@@ -6,7 +6,7 @@ from telegram import Bot
 from datetime import datetime, timedelta
 
 # Переменные окружения
-TOKEN = os.getenv("BOT_TOKEN")  
+TOKEN = os.getenv("TOKEN")  
 CHAT_ID = int(os.getenv("CHAT_ID"))
 
 bot = Bot(token=TOKEN)
