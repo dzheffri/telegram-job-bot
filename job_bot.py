@@ -70,21 +70,7 @@ async def check_rabotaua(session):
                 await send_message(f"Rabota.ua:\n{title}\n{link}")
 
 # Djinni через Playwright (headless браузер)
-from playwright.async_api import async_playwright
 
-async def check_djinni():
-    async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=True)
-        page = await browser.new_page()
-        await page.goto("https://djinni.co/jobs/?primary_keyword=QA")
-        jobs = await page.query_selector_all("a.profile")
-        for job in jobs:
-            title = (await job.inner_text()).strip()
-            link = "https://djinni.co" + await job.get_attribute("href")
-            if "qa" in title.lower() and link not in sent_jobs:
-                sent_jobs.add(link)
-                await send_message(f"Djinni:\n{title}\n{link}")
-        await browser.close()
 
 # Основной цикл проверки
 async def job_check_loop():
