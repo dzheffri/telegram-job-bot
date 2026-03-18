@@ -7,7 +7,7 @@ from telegram import Bot
 from datetime import datetime
 
 # Берем данные из Railway (Variables)
-TOKEN = os.getenv("8618394268:AAHW0AT89GlV1jxz2LEgXWHFYwKXsOqjHM4")
+TOKEN = os.getenv("TOKEN")
 CHAT_ID = int(os.getenv("CHAT_ID"))
 
 bot = Bot(token=TOKEN)
