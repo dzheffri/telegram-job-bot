@@ -5,14 +5,14 @@ from bs4 import BeautifulSoup
 from telegram import Bot
 from datetime import datetime, timedelta
 
-# Получаем токен и чат ID из переменных окружения Railway
-TOKEN = os.getenv("TOKEN")
+# Переменные окружения
+TOKEN = os.getenv("BOT_TOKEN")  
 CHAT_ID = int(os.getenv("CHAT_ID"))
 
 bot = Bot(token=TOKEN)
-sent_jobs = set()  # чтобы не слать повторно
+sent_jobs = set()  # Чтобы не слать повторно
 
-# Период, чтобы считать вакансии "свежими" (5 минут)
+# Интервал "свежих вакансий" — 5 минут
 FRESH_DELTA = timedelta(minutes=5)
 
 async def send_message(text):
@@ -64,25 +64,25 @@ async def check_workua(session):
 
 # Rabota.ua
 async def check_rabotaua(session):
-    url = "https://rabota.ua/zapros/qa-junior"
+    # Рабочий URL поиска (пример: junior QA engineer)
+    url = "https://robota.ua/zapros/junior-qa-engineer-testyrovshchyk/ukraine"
     headers = {"User-Agent": "Mozilla/5.0"}
     html = await fetch(session, url, headers)
     soup = BeautifulSoup(html, "html.parser")
-    jobs = soup.find_all("div", class_="f-vacancy-title")
-    for job in jobs:
-        link_tag = job.find("a")
-        if link_tag:
-            title = link_tag.text.strip()
-            link = "https://rabota.ua" + link_tag["href"]
-            time_tag = job.find_next("span", class_="date")
-            if time_tag:
-                posted_str = time_tag.text.strip()
-                if "мин" in posted_str.lower() or "час" in posted_str.lower() or "сегодня" in posted_str.lower():
-                    if link not in sent_jobs:
-                        sent_jobs.add(link)
-                        await send_message(f"Rabota.ua:\n{title}\n{link}")
 
-# Основной цикл проверки
+    # На Rabota.ua вакансии часто в <li> с классами или <a> с href
+    jobs = soup.find_all("a", href=True)
+    for job in jobs:
+        title = job.text.strip()
+        link = job["href"]
+        # Фильтруем по ключевым словам
+        if any(word in title.lower() for word in ["qa", "тест", "tester"]):
+            if link.startswith("/"):
+                link = "https://rabota.ua" + link
+            if link not in sent_jobs:
+                sent_jobs.add(link)
+                await send_message(f"Rabota.ua:\n{title}\n{link}")
+
 async def job_check_loop():
     async with aiohttp.ClientSession() as session:
         while True:
@@ -96,5 +96,5 @@ async def job_check_loop():
                 print("Ошибка:", e)
                 await asyncio.sleep(60)
 
-if __name__ == "__main__":
+if name == "__main__":
     asyncio.run(job_check_loop())
