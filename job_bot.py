@@ -8,7 +8,7 @@ from datetime import datetime
 
 # Берем данные из Railway (Variables)
 TOKEN = os.getenv("8618394268:AAHW0AT89GlV1jxz2LEgXWHFYwKXsOqjHM4")
-CHAT_ID = int(os.getenv("566408696"))
+CHAT_ID = int(os.getenv("CHAT_ID"))
 
 bot = Bot(token=TOKEN)
 sent_jobs = set()  # чтобы не дублировать вакансии
