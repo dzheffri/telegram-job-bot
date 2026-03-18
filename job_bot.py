@@ -96,5 +96,5 @@ async def job_check_loop():
                 print("Ошибка:", e)
                 await asyncio.sleep(60)
 
-if name == "__main__":
+if __name__ == "__main__":
     asyncio.run(job_check_loop())
