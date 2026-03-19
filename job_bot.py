@@ -7,9 +7,6 @@ from telegram import Bot, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CallbackQueryHandler
 from datetime import datetime
 
-# ==============================
-# НАСТРОЙКИ
-# ==============================
 TOKEN = os.getenv("TOKEN")
 CHAT_ID = int(os.getenv("CHAT_ID"))
 
@@ -17,9 +14,9 @@ SENT_FILE = "sent_jobs.json"
 APPLIED_FILE = "applied_jobs.json"
 
 bot = Bot(token=TOKEN)
-
 sent_jobs = set()
 applied_jobs = set()
+
 
 # ==============================
 # LOAD / SAVE
@@ -37,14 +34,17 @@ def load_data():
     except:
         applied_jobs = set()
 
+
 def save_applied():
     with open(APPLIED_FILE, "w") as f:
         json.dump(list(applied_jobs), f)
+
 
 def add_job(link):
     sent_jobs.add(link)
     with open(SENT_FILE, "w") as f:
         json.dump(list(sent_jobs), f)
+
 
 # ==============================
 # ФИЛЬТРЫ
@@ -52,8 +52,10 @@ def add_job(link):
 def is_junior(title):
     return any(x in title.lower() for x in ["junior", "trainee", "intern"])
 
+
 def is_qa(title):
     return "qa" in title.lower()
+
 
 # ==============================
 # COVER LETTER
@@ -75,6 +77,7 @@ def generate_cover_letter(company):
 Буду радий можливості поспілкуватися!
 """
 
+
 # ==============================
 # TELEGRAM
 # ==============================
@@ -91,6 +94,7 @@ async def send_job(title, link, company):
         text=f"🟢 JUNIOR\n{title}\n🏢 {company}\n{link}",
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
+
 
 # ==============================
 # CALLBACK HANDLER
@@ -112,6 +116,7 @@ async def button_handler(update, context):
         applied_jobs.add(link)
         save_applied()
         await query.edit_message_text("✅ Отмечено")
+
 
 # ==============================
 # PARSER
@@ -145,6 +150,7 @@ async def check_workua(session):
         add_job(link)
         await send_job(title, link, company)
 
+
 # ==============================
 # BACKGROUND LOOP
 # ==============================
@@ -160,19 +166,25 @@ async def job_loop():
             print("❌ ERROR:", e)
         await asyncio.sleep(300)  # 5 минут
 
+
 # ==============================
 # MAIN
 # ==============================
-async def main():
+def main():
     load_data()
+
     app = Application.builder().token(TOKEN).build()
     app.add_handler(CallbackQueryHandler(button_handler))
 
-    # запускаем фоновый цикл через asyncio
-    asyncio.create_task(job_loop())
+    # запускаем фоновый цикл через post_init
+    async def start_background(_app):
+        asyncio.create_task(job_loop())
+
+    app.post_init = start_background
 
     print("🚀 BOT START")
-    await app.run_polling()
+    app.run_polling()
+
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()
