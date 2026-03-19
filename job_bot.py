@@ -6,21 +6,15 @@ from bs4 import BeautifulSoup
 from telegram import Bot
 from datetime import datetime
 
-# =========================
-# ENV
-# =========================
 TOKEN = os.getenv("TOKEN")
 CHAT_ID = int(os.getenv("CHAT_ID"))
 
 bot = Bot(token=TOKEN)
 
-# =========================
-# STORAGE
-# =========================
 SENT_FILE = "sent_jobs.json"
 sent_jobs = set()
 
-MAX_JOBS = 1000  # чтобы не разрасталось
+MAX_JOBS = 1000
 
 
 def load_jobs():
@@ -46,16 +40,12 @@ def add_job(link):
     save_jobs()
 
 
-# =========================
-# FILTER
-# =========================
 def is_relevant_job(title: str) -> bool:
     title = title.lower()
 
     if "qa" not in title:
         return False
 
-    # убираем мусор
     blacklist = ["lead", "manager", "head"]
     if any(word in title for word in blacklist):
         return False
@@ -68,9 +58,6 @@ def is_junior(title: str) -> bool:
     return any(word in title for word in ["junior", "trainee", "intern"])
 
 
-# =========================
-# CORE
-# =========================
 async def send_message(text):
     await bot.send_message(chat_id=CHAT_ID, text=text)
 
@@ -80,9 +67,6 @@ async def fetch(session, url, headers=None):
         return await response.text()
 
 
-# =========================
-# DOU
-# =========================
 async def check_dou(session):
     url = "https://jobs.dou.ua/vacancies/?search=qa"
     headers = {"User-Agent": "Mozilla/5.0"}
@@ -101,14 +85,10 @@ async def check_dou(session):
 
         if link not in sent_jobs:
             add_job(link)
-
             prefix = "🟢 JUNIOR" if is_junior(title) else "QA"
             await send_message(f"{prefix} | DOU\n{title}\n{link}")
 
 
-# =========================
-# Work.ua
-# =========================
 async def check_workua(session):
     url = "https://www.work.ua/jobs-qa/"
     headers = {"User-Agent": "Mozilla/5.0"}
@@ -131,14 +111,10 @@ async def check_workua(session):
 
         if link not in sent_jobs:
             add_job(link)
-
             prefix = "🟢 JUNIOR" if is_junior(title) else "QA"
             await send_message(f"{prefix} | Work.ua\n{title}\n{link}")
 
 
-# =========================
-# Rabota.ua
-# =========================
 async def check_rabotaua(session):
     url = "https://robota.ua/zapros/qa/ukraine"
     headers = {"User-Agent": "Mozilla/5.0"}
@@ -163,19 +139,16 @@ async def check_rabotaua(session):
 
         if link not in sent_jobs:
             add_job(link)
-
             prefix = "🟢 JUNIOR" if is_junior(title) else "QA"
             await send_message(f"{prefix} | Rabota.ua\n{title}\n{link}")
 
 
-# =========================
-# LOOP
-# =========================
 async def job_loop():
     load_jobs()
 
     async with aiohttp.ClientSession() as session:
         while True:
+            print("LOOP STARTED 🔁")  # 👈 ВОТ ОН
             try:
                 print(f"{datetime.now()} 🔍 checking jobs...")
 
@@ -185,15 +158,12 @@ async def job_loop():
 
                 print(f"{datetime.now()} ✅ done")
 
-                await asyncio.sleep(300)  # 5 минут
+                await asyncio.sleep(300)
 
             except Exception as e:
                 print("❌ ERROR:", e)
                 await asyncio.sleep(60)
 
 
-# =========================
-# START
-# =========================
 if __name__ == "__main__":
     asyncio.run(job_loop())
