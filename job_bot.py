@@ -82,6 +82,8 @@ def generate_cover_letter(company):
 # TELEGRAM
 # ==============================
 async def send_job(bot, title, link, company):
+    prefix = "🟢 JUNIOR" if is_junior(title) else "QA"
+
     keyboard = [
         [
             InlineKeyboardButton("🚀 Откликнуться", callback_data=f"apply|{link}|{company}"),
@@ -92,7 +94,7 @@ async def send_job(bot, title, link, company):
     try:
         await bot.send_message(
             chat_id=CHAT_ID,
-            text=f"🟢 JUNIOR\n{title}\n🏢 {company}\n{link}",
+            text=f"{prefix}\n{title}\n🏢 {company}\n{link}",
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
     except (TimedOut, NetworkError):
@@ -129,7 +131,7 @@ async def button_handler(update, context):
 
 
 # ==============================
-# PARSER
+# PARSERS
 # ==============================
 async def check_workua(bot, session):
     url = "https://www.work.ua/jobs-qa/"
@@ -146,17 +148,65 @@ async def check_workua(bot, session):
 
         title = a.text.strip()
         link = "https://www.work.ua" + a["href"]
-
         company_tag = job.find("span", class_="company")
         company = company_tag.text.strip() if company_tag else "Компанія"
 
-        if not is_qa(title) or not is_junior(title):
+        if not is_qa(title):
             continue
 
         if link in sent_jobs or link in applied_jobs:
             continue
 
-        print("NEW:", title)
+        add_job(link)
+        await send_job(bot, title, link, company)
+
+
+async def check_dou(bot, session):
+    url = "https://jobs.dou.ua/vacancies/?search=qa"
+    headers = {"User-Agent": "Mozilla/5.0"}
+    async with session.get(url, headers=headers) as resp:
+        html = await resp.text()
+
+    soup = BeautifulSoup(html, "html.parser")
+    jobs = soup.find_all("a", class_="vt")[:20]
+
+    for job in jobs:
+        title = job.text.strip()
+        link = job["href"]
+
+        if not is_qa(title):
+            continue
+
+        if link in sent_jobs or link in applied_jobs:
+            continue
+
+        company = "Компанія DOU.ua"
+        add_job(link)
+        await send_job(bot, title, link, company)
+
+
+async def check_rabotaua(bot, session):
+    url = "https://robota.ua/zapros/qa/ukraine"
+    async with session.get(url) as resp:
+        html = await resp.text()
+
+    soup = BeautifulSoup(html, "html.parser")
+    jobs = soup.find_all("a", href=True)[:50]
+
+    for job in jobs:
+        title = job.text.strip()
+        link = job["href"]
+
+        if not title or not is_qa(title):
+            continue
+
+        if link.startswith("/"):
+            link = "https://robota.ua" + link
+
+        if link in sent_jobs or link in applied_jobs:
+            continue
+
+        company = "Компанія Rabota.ua"
         add_job(link)
         await send_job(bot, title, link, company)
 
@@ -172,6 +222,8 @@ async def job_loop(bot):
         try:
             async with aiohttp.ClientSession() as session:
                 await check_workua(bot, session)
+                await check_dou(bot, session)
+                await check_rabotaua(bot, session)
         except Exception as e:
             print("❌ ERROR:", e)
         await asyncio.sleep(300)  # 5 минут
@@ -182,11 +234,9 @@ async def job_loop(bot):
 # ==============================
 def main():
     load_data()
-
     app = Application.builder().token(TOKEN).build()
     app.add_handler(CallbackQueryHandler(button_handler))
 
-    # запускаем фоновый цикл через post_init
     async def start_background(_app):
         asyncio.create_task(job_loop(_app.bot))
 
