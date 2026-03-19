@@ -80,7 +80,7 @@ def generate_cover_letter(company):
 
 
 # ==============================
-# TELEGRAM
+# TELEGRAM С ОШИБКОЙ И ПОВТОРОМ
 # ==============================
 async def send_job(title, link, company):
     prefix = "🟢 JUNIOR" if is_junior(title) else "QA"
@@ -91,14 +91,20 @@ async def send_job(title, link, company):
             InlineKeyboardButton("✅ Уже откликнулся", callback_data=f"done|{link}")
         ]
     ]
-    try:
-        await bot.send_message(
-            chat_id=CHAT_ID,
-            text=f"{prefix}\n{title}\n🏢 {company}\n{link}",
-            reply_markup=InlineKeyboardMarkup(keyboard)
-        )
-    except (TimedOut, NetworkError):
-        print(f"❌ Ошибка отправки вакансии: {title}")
+
+    for attempt in range(3):  # до 3 попыток отправки
+        try:
+            await bot.send_message(
+                chat_id=CHAT_ID,
+                text=f"{prefix}\n{title}\n🏢 {company}\n{link}",
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
+            break  # если получилось, выходим из цикла
+        except (TimedOut, NetworkError) as e:
+            print(f"❌ Ошибка отправки вакансии: {title} | Попытка {attempt+1} | {e}")
+            await asyncio.sleep(2)  # подождать 2 секунды перед повтором
+
+    await asyncio.sleep(1)  # небольшая задержка между сообщениями
 
 
 # ==============================
