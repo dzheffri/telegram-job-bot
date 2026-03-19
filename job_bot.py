@@ -3,12 +3,10 @@ import aiohttp
 import os
 import json
 from bs4 import BeautifulSoup
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Bot, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CallbackQueryHandler
-from telegram.error import TimedOut, NetworkError
-from telegram.request import Request
-from telegram import Bot
 from datetime import datetime
+from telegram.error import TimedOut, NetworkError
 
 TOKEN = os.getenv("TOKEN")
 CHAT_ID = int(os.getenv("CHAT_ID"))
@@ -16,8 +14,10 @@ CHAT_ID = int(os.getenv("CHAT_ID"))
 SENT_FILE = "sent_jobs.json"
 APPLIED_FILE = "applied_jobs.json"
 
+bot = Bot(token=TOKEN)
 sent_jobs = set()
 applied_jobs = set()
+
 
 # ==============================
 # LOAD / SAVE
@@ -80,9 +80,9 @@ def generate_cover_letter(company):
 
 
 # ==============================
-# TELEGRAM с повтором
+# TELEGRAM
 # ==============================
-async def send_job(bot, title, link, company):
+async def send_job(title, link, company):
     prefix = "🟢 JUNIOR" if is_junior(title) else "QA"
 
     keyboard = [
@@ -91,22 +91,14 @@ async def send_job(bot, title, link, company):
             InlineKeyboardButton("✅ Уже откликнулся", callback_data=f"done|{link}")
         ]
     ]
-
-    retries = 2
-    for attempt in range(1, retries + 2):
-        try:
-            await bot.send_message(
-                chat_id=CHAT_ID,
-                text=f"{prefix}\n{title}\n🏢 {company}\n{link}",
-                reply_markup=InlineKeyboardMarkup(keyboard)
-            )
-            break
-        except (TimedOut, NetworkError):
-            print(f"❌ Ошибка отправки вакансии: {title}, попытка {attempt}")
-            if attempt <= retries:
-                await asyncio.sleep(2)
-            else:
-                print(f"❌ Не удалось отправить {title} после {retries+1} попыток")
+    try:
+        await bot.send_message(
+            chat_id=CHAT_ID,
+            text=f"{prefix}\n{title}\n🏢 {company}\n{link}",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+    except (TimedOut, NetworkError):
+        print(f"❌ Ошибка отправки вакансии: {title}")
 
 
 # ==============================
@@ -117,41 +109,28 @@ async def button_handler(update, context):
     await query.answer()
 
     data = query.data
-    bot = context.bot
 
     if data.startswith("apply"):
         _, link, company = data.split("|")
         text = generate_cover_letter(company)
-        retries = 2
-        for attempt in range(1, retries + 2):
-            try:
-                await query.message.reply_text(f"📄 Текст:\n\n{text}")
-                await query.message.reply_text(f"🔗 {link}")
-                break
-            except (TimedOut, NetworkError):
-                print(f"❌ Ошибка при отправке отклика на {link}, попытка {attempt}")
-                if attempt <= retries:
-                    await asyncio.sleep(2)
-                else:
-                    print(f"❌ Не удалось отправить отклик {link} после {retries+1} попыток")
+        await query.message.reply_text(f"📄 Текст:\n\n{text}")
+        await query.message.reply_text(f"🔗 {link}")
 
     elif data.startswith("done"):
         _, link = data.split("|")
         applied_jobs.add(link)
         save_applied()
-        try:
-            await query.edit_message_text("✅ Отмечено")
-        except (TimedOut, NetworkError):
-            print(f"❌ Ошибка при отметке вакансии {link}")
+        await query.edit_message_text("✅ Отмечено")
 
 
 # ==============================
 # PARSERS
 # ==============================
-async def check_workua(bot, session):
+async def check_workua():
     url = "https://www.work.ua/jobs-qa/"
-    async with session.get(url) as resp:
-        html = await resp.text()
+    async with aiohttp.ClientSession() as session:
+        async with session.get(url) as resp:
+            html = await resp.text()
 
     soup = BeautifulSoup(html, "html.parser")
     jobs = soup.find_all("div", class_="job-link")[:20]
@@ -173,14 +152,15 @@ async def check_workua(bot, session):
             continue
 
         add_job(link)
-        await send_job(bot, title, link, company)
+        await send_job(title, link, company)
 
 
-async def check_dou(bot, session):
+async def check_dou():
     url = "https://jobs.dou.ua/vacancies/?search=qa"
     headers = {"User-Agent": "Mozilla/5.0"}
-    async with session.get(url, headers=headers) as resp:
-        html = await resp.text()
+    async with aiohttp.ClientSession() as session:
+        async with session.get(url, headers=headers) as resp:
+            html = await resp.text()
 
     soup = BeautifulSoup(html, "html.parser")
     jobs = soup.find_all("a", class_="vt")[:20]
@@ -197,13 +177,14 @@ async def check_dou(bot, session):
 
         company = "Компанія DOU.ua"
         add_job(link)
-        await send_job(bot, title, link, company)
+        await send_job(title, link, company)
 
 
-async def check_rabotaua(bot, session):
+async def check_rabotaua():
     url = "https://robota.ua/zapros/qa/ukraine"
-    async with session.get(url) as resp:
-        html = await resp.text()
+    async with aiohttp.ClientSession() as session:
+        async with session.get(url) as resp:
+            html = await resp.text()
 
     soup = BeautifulSoup(html, "html.parser")
     jobs = soup.find_all("a", href=True)[:50]
@@ -223,22 +204,21 @@ async def check_rabotaua(bot, session):
 
         company = "Компанія Rabota.ua"
         add_job(link)
-        await send_job(bot, title, link, company)
+        await send_job(title, link, company)
 
 
 # ==============================
 # BACKGROUND LOOP
 # ==============================
-async def job_loop(bot):
+async def job_loop():
     await asyncio.sleep(5)
     while True:
         print("🔁 CHECK", datetime.now())
         load_data()
         try:
-            async with aiohttp.ClientSession() as session:
-                await check_workua(bot, session)
-                await check_dou(bot, session)
-                await check_rabotaua(bot, session)
+            await check_workua()
+            await check_dou()
+            await check_rabotaua()
         except Exception as e:
             print("❌ ERROR:", e)
         await asyncio.sleep(300)  # 5 минут
@@ -250,14 +230,11 @@ async def job_loop(bot):
 def main():
     load_data()
 
-    request = Request(connect_timeout=10, read_timeout=20)
-    bot = Bot(token=TOKEN, request=request)
-
     app = Application.builder().token(TOKEN).build()
     app.add_handler(CallbackQueryHandler(button_handler))
 
     async def start_background(_app):
-        asyncio.create_task(job_loop(bot))
+        asyncio.create_task(job_loop())
 
     app.post_init = start_background
 
