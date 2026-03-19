@@ -7,6 +7,9 @@ from telegram import Bot, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CallbackQueryHandler
 from datetime import datetime
 
+# ==============================
+# НАСТРОЙКИ
+# ==============================
 TOKEN = os.getenv("TOKEN")
 CHAT_ID = int(os.getenv("CHAT_ID"))
 
@@ -23,13 +26,11 @@ applied_jobs = set()
 # ==============================
 def load_data():
     global sent_jobs, applied_jobs
-
     try:
         with open(SENT_FILE, "r") as f:
             sent_jobs = set(json.load(f))
     except:
         sent_jobs = set()
-
     try:
         with open(APPLIED_FILE, "r") as f:
             applied_jobs = set(json.load(f))
@@ -46,7 +47,7 @@ def add_job(link):
         json.dump(list(sent_jobs), f)
 
 # ==============================
-# FILTERS
+# ФИЛЬТРЫ
 # ==============================
 def is_junior(title):
     return any(x in title.lower() for x in ["junior", "trainee", "intern"])
@@ -92,7 +93,7 @@ async def send_job(title, link, company):
     )
 
 # ==============================
-# BUTTON HANDLER
+# CALLBACK HANDLER
 # ==============================
 async def button_handler(update, context):
     query = update.callback_query
@@ -102,9 +103,7 @@ async def button_handler(update, context):
 
     if data.startswith("apply"):
         _, link, company = data.split("|")
-
         text = generate_cover_letter(company)
-
         await query.message.reply_text(f"📄 Текст:\n\n{text}")
         await query.message.reply_text(f"🔗 {link}")
 
@@ -143,7 +142,6 @@ async def check_workua(session):
             continue
 
         print("NEW:", title)
-
         add_job(link)
         await send_job(title, link, company)
 
@@ -152,33 +150,28 @@ async def check_workua(session):
 # ==============================
 async def job_loop():
     await asyncio.sleep(5)
-
     while True:
         print("🔁 CHECK", datetime.now())
-
         load_data()
-
         try:
             async with aiohttp.ClientSession() as session:
                 await check_workua(session)
         except Exception as e:
-            print("ERROR:", e)
-
-        await asyncio.sleep(300)
+            print("❌ ERROR:", e)
+        await asyncio.sleep(300)  # 5 минут
 
 # ==============================
 # MAIN
 # ==============================
 async def main():
     load_data()
-
     app = Application.builder().token(TOKEN).build()
     app.add_handler(CallbackQueryHandler(button_handler))
 
+    # запускаем фоновый цикл через asyncio
     asyncio.create_task(job_loop())
 
     print("🚀 BOT START")
-
     await app.run_polling()
 
 if __name__ == "__main__":
