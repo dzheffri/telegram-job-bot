@@ -3,7 +3,7 @@ import aiohttp
 import os
 import json
 from bs4 import BeautifulSoup
-from telegram import Bot, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CallbackQueryHandler
 from telegram.error import TimedOut, NetworkError
 from datetime import datetime
@@ -13,9 +13,6 @@ CHAT_ID = int(os.getenv("CHAT_ID"))
 
 SENT_FILE = "sent_jobs.json"
 APPLIED_FILE = "applied_jobs.json"
-
-# Увеличиваем таймауты для надежности
-bot = Bot(token=TOKEN, request_kwargs={"read_timeout": 10, "connect_timeout": 10})
 
 sent_jobs = set()
 applied_jobs = set()
@@ -84,7 +81,7 @@ def generate_cover_letter(company):
 # ==============================
 # TELEGRAM
 # ==============================
-async def send_job(title, link, company):
+async def send_job(bot, title, link, company):
     keyboard = [
         [
             InlineKeyboardButton("🚀 Откликнуться", callback_data=f"apply|{link}|{company}"),
@@ -98,10 +95,8 @@ async def send_job(title, link, company):
             text=f"🟢 JUNIOR\n{title}\n🏢 {company}\n{link}",
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
-    except TimedOut:
-        print(f"❌ TimedOut при отправке вакансии: {title}")
-    except NetworkError:
-        print(f"❌ NetworkError при отправке вакансии: {title}")
+    except (TimedOut, NetworkError):
+        print(f"❌ Ошибка отправки вакансии: {title}")
 
 
 # ==============================
@@ -112,6 +107,7 @@ async def button_handler(update, context):
     await query.answer()
 
     data = query.data
+    bot = context.bot
 
     if data.startswith("apply"):
         _, link, company = data.split("|")
@@ -135,7 +131,7 @@ async def button_handler(update, context):
 # ==============================
 # PARSER
 # ==============================
-async def check_workua(session):
+async def check_workua(bot, session):
     url = "https://www.work.ua/jobs-qa/"
     async with session.get(url) as resp:
         html = await resp.text()
@@ -162,20 +158,20 @@ async def check_workua(session):
 
         print("NEW:", title)
         add_job(link)
-        await send_job(title, link, company)
+        await send_job(bot, title, link, company)
 
 
 # ==============================
 # BACKGROUND LOOP
 # ==============================
-async def job_loop():
+async def job_loop(bot):
     await asyncio.sleep(5)
     while True:
         print("🔁 CHECK", datetime.now())
         load_data()
         try:
             async with aiohttp.ClientSession() as session:
-                await check_workua(session)
+                await check_workua(bot, session)
         except Exception as e:
             print("❌ ERROR:", e)
         await asyncio.sleep(300)  # 5 минут
@@ -192,7 +188,7 @@ def main():
 
     # запускаем фоновый цикл через post_init
     async def start_background(_app):
-        asyncio.create_task(job_loop())
+        asyncio.create_task(job_loop(_app.bot))
 
     app.post_init = start_background
 
