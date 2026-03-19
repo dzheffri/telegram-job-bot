@@ -178,9 +178,15 @@ async def job_loop():
 # ==============================
 def main():
     app = Application.builder().token(TOKEN).build()
+
     app.add_handler(CallbackQueryHandler(button_handler))
 
-    asyncio.create_task(job_loop())
+    # запуск фоновой задачи правильно
+    async def on_startup(app):
+        app.create_task(job_loop())
+
+    app.post_init = on_startup
+
     app.run_polling()
 
 if __name__ == "__main__":
