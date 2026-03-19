@@ -1,15 +1,16 @@
-import asyncio
-import aiohttp
 import os
 import json
-from bs4 import BeautifulSoup
-from telegram import Bot, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CallbackQueryHandler
+import aiohttp
+import asyncio
 from datetime import datetime
-from telegram.error import TimedOut, NetworkError, Conflict
+from bs4 import BeautifulSoup
+from telegram import Bot, InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram.ext import Application, CallbackQueryHandler, ContextTypes, CommandHandler
 
 TOKEN = os.getenv("TOKEN")
 CHAT_ID = int(os.getenv("CHAT_ID"))
+WEBHOOK_URL = os.getenv("WEBHOOK_URL")  # https://yourapp.up.railway.app/webhook
+PORT = int(os.getenv("PORT", 8443))
 
 SENT_FILE = "sent_jobs.json"
 APPLIED_FILE = "applied_jobs.json"
@@ -18,9 +19,8 @@ bot = Bot(token=TOKEN)
 sent_jobs = set()
 applied_jobs = set()
 
-
 # ==============================
-# LOAD / SAVE
+# Load / Save
 # ==============================
 def load_data():
     global sent_jobs, applied_jobs
@@ -35,31 +35,29 @@ def load_data():
     except:
         applied_jobs = set()
 
+def save_sent():
+    with open(SENT_FILE, "w") as f:
+        json.dump(list(sent_jobs), f)
 
 def save_applied():
     with open(APPLIED_FILE, "w") as f:
         json.dump(list(applied_jobs), f)
 
-
 def add_job(link):
     sent_jobs.add(link)
-    with open(SENT_FILE, "w") as f:
-        json.dump(list(sent_jobs), f)
-
+    save_sent()
 
 # ==============================
-# ФИЛЬТРЫ
+# Filters
 # ==============================
 def is_junior(title):
     return any(x in title.lower() for x in ["junior", "trainee", "intern"])
 
-
 def is_qa(title):
     return "qa" in title.lower()
 
-
 # ==============================
-# COVER LETTER
+# Cover Letter
 # ==============================
 def generate_cover_letter(company):
     return f"""Доброго дня!
@@ -78,13 +76,10 @@ def generate_cover_letter(company):
 Буду радий можливості поспілкуватися!
 """
 
-
 # ==============================
-# TELEGRAM С ОБРАБОТКОЙ ОШИБОК
+# Send Job Message
 # ==============================
 async def send_job(title, link, company):
-    prefix = "🟢 JUNIOR" if is_junior(title) else "QA"
-
     keyboard = [
         [
             InlineKeyboardButton("🚀 Откликнуться", callback_data=f"apply|{link}|{company}"),
@@ -92,55 +87,37 @@ async def send_job(title, link, company):
         ]
     ]
 
-    for attempt in range(3):  # до 3 попыток
-        try:
-            await bot.send_message(
-                chat_id=CHAT_ID,
-                text=f"{prefix}\n{title}\n🏢 {company}\n{link}",
-                reply_markup=InlineKeyboardMarkup(keyboard)
-            )
-            break
-        except (TimedOut, NetworkError) as e:
-            print(f"❌ Ошибка отправки вакансии: {title} | Попытка {attempt+1} | {e}")
-            await asyncio.sleep(2)
-        except Conflict as e:
-            print(f"⚠ Конфликт getUpdates: {e} | Пропускаем отправку")
-            break
-
-    await asyncio.sleep(1)  # небольшая задержка между сообщениями
-
+    await bot.send_message(
+        chat_id=CHAT_ID,
+        text=f"{'🟢 JUNIOR' if is_junior(title) else 'QA'}\n{title}\n🏢 {company}\n{link}",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
 
 # ==============================
-# CALLBACK HANDLER
+# Button Handler
 # ==============================
-async def button_handler(update, context):
+async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
 
     data = query.data
-
     if data.startswith("apply"):
         _, link, company = data.split("|")
         text = generate_cover_letter(company)
-        await query.message.reply_text(f"📄 Текст:\n\n{text}")
-        await query.message.reply_text(f"🔗 {link}")
-
+        await query.message.reply_text(f"📄 Текст для отклика:\n\n{text}\n\n🔗 {link}")
     elif data.startswith("done"):
         _, link = data.split("|")
         applied_jobs.add(link)
         save_applied()
-        await query.edit_message_text("✅ Отмечено")
-
+        await query.edit_message_text("✅ Отмечено как откликнуто")
 
 # ==============================
-# PARSERS
+# Parsers
 # ==============================
-async def check_workua():
+async def check_workua(session):
     url = "https://www.work.ua/jobs-qa/"
-    async with aiohttp.ClientSession() as session:
-        async with session.get(url) as resp:
-            html = await resp.text()
-
+    async with session.get(url) as resp:
+        html = await resp.text()
     soup = BeautifulSoup(html, "html.parser")
     jobs = soup.find_all("div", class_="job-link")[:20]
 
@@ -148,7 +125,6 @@ async def check_workua():
         a = job.find("a")
         if not a:
             continue
-
         title = a.text.strip()
         link = "https://www.work.ua" + a["href"]
         company_tag = job.find("span", class_="company")
@@ -156,68 +132,14 @@ async def check_workua():
 
         if not is_qa(title):
             continue
-
         if link in sent_jobs or link in applied_jobs:
             continue
 
         add_job(link)
         await send_job(title, link, company)
-
-
-async def check_dou():
-    url = "https://jobs.dou.ua/vacancies/?search=qa"
-    headers = {"User-Agent": "Mozilla/5.0"}
-    async with aiohttp.ClientSession() as session:
-        async with session.get(url, headers=headers) as resp:
-            html = await resp.text()
-
-    soup = BeautifulSoup(html, "html.parser")
-    jobs = soup.find_all("a", class_="vt")[:20]
-
-    for job in jobs:
-        title = job.text.strip()
-        link = job["href"]
-
-        if not is_qa(title):
-            continue
-
-        if link in sent_jobs or link in applied_jobs:
-            continue
-
-        company = "Компанія DOU.ua"
-        add_job(link)
-        await send_job(title, link, company)
-
-
-async def check_rabotaua():
-    url = "https://robota.ua/zapros/qa/ukraine"
-    async with aiohttp.ClientSession() as session:
-        async with session.get(url) as resp:
-            html = await resp.text()
-
-    soup = BeautifulSoup(html, "html.parser")
-    jobs = soup.find_all("a", href=True)[:50]
-
-    for job in jobs:
-        title = job.text.strip()
-        link = job["href"]
-
-        if not title or not is_qa(title):
-            continue
-
-        if link.startswith("/"):
-            link = "https://robota.ua" + link
-
-        if link in sent_jobs or link in applied_jobs:
-            continue
-
-        company = "Компанія Rabota.ua"
-        add_job(link)
-        await send_job(title, link, company)
-
 
 # ==============================
-# BACKGROUND LOOP
+# Background Loop
 # ==============================
 async def job_loop():
     await asyncio.sleep(5)
@@ -225,31 +147,31 @@ async def job_loop():
         print("🔁 CHECK", datetime.now())
         load_data()
         try:
-            await check_workua()
-            await check_dou()
-            await check_rabotaua()
+            async with aiohttp.ClientSession() as session:
+                await check_workua(session)
         except Exception as e:
-            print("❌ ERROR:", e)
+            print("❌ Ошибка:", e)
         await asyncio.sleep(300)  # 5 минут
 
+# ==============================
+# Webhook Setup
+# ==============================
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("Бот запущен и работает!")
 
-# ==============================
-# MAIN
-# ==============================
 def main():
     load_data()
-
     app = Application.builder().token(TOKEN).build()
+    app.add_handler(CommandHandler("start", start))
     app.add_handler(CallbackQueryHandler(button_handler))
 
+    # Запуск фонового цикла
     async def start_background(_app):
         asyncio.create_task(job_loop())
-
     app.post_init = start_background
 
-    print("🚀 BOT START")
-    app.run_polling()
-
+    # Устанавливаем webhook
+    app.run_webhook(listen="0.0.0.0", port=PORT, webhook_url=WEBHOOK_URL)
 
 if __name__ == "__main__":
     main()
