@@ -152,23 +152,6 @@ async def check_workua(session):
 
 
 # ==============================
-# TEST MESSAGE
-# ==============================
-async def send_test_message():
-    keyboard = [
-        [
-            InlineKeyboardButton("🚀 Откликнуться", callback_data="apply|https://example.com|Тестова компанія"),
-            InlineKeyboardButton("✅ Уже откликнулся", callback_data="done|https://example.com")
-        ]
-    ]
-    await bot.send_message(
-        chat_id=CHAT_ID,
-        text="🟢 Тестовое сообщение\nПроверка кнопок",
-        reply_markup=InlineKeyboardMarkup(keyboard)
-    )
-
-
-# ==============================
 # BACKGROUND LOOP
 # ==============================
 async def job_loop():
@@ -193,10 +176,9 @@ def main():
     app = Application.builder().token(TOKEN).build()
     app.add_handler(CallbackQueryHandler(button_handler))
 
-    # запускаем фоновый цикл через post_init + тестовое сообщение
+    # запускаем фоновый цикл через post_init
     async def start_background(_app):
         asyncio.create_task(job_loop())
-        asyncio.create_task(send_test_message())  # тестовое сообщение
 
     app.post_init = start_background
 
