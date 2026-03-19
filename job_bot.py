@@ -6,7 +6,6 @@ from bs4 import BeautifulSoup
 from telegram import Bot, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CallbackQueryHandler
 from datetime import datetime
-import time
 
 # ==============================
 # НАСТРОЙКИ
@@ -153,25 +152,24 @@ async def check_workua(session):
         if link in sent_jobs or link in applied_jobs:
             continue
 
+        print(f"🆕 NEW JOB: {title}")
+
         add_job(link)
         await send_job(title, link, "Work.ua", company)
 
 # ==============================
-# LOOP
+# JOB TASK (каждые 5 минут)
 # ==============================
-async def job_loop():
+async def job_task(context):
+    print("🔁 CHECK", datetime.now())
+
     load_data()
 
     async with aiohttp.ClientSession() as session:
-        while True:
-            print("🔁 LOOP", datetime.now())
-
-            try:
-                await check_workua(session)
-                await asyncio.sleep(300)
-            except Exception as e:
-                print("ERROR:", e)
-                await asyncio.sleep(60)
+        try:
+            await check_workua(session)
+        except Exception as e:
+            print("❌ ERROR:", e)
 
 # ==============================
 # START
@@ -181,11 +179,10 @@ def main():
 
     app.add_handler(CallbackQueryHandler(button_handler))
 
-    # запуск фоновой задачи правильно
-    async def on_startup(app):
-        app.create_task(job_loop())
+    # каждые 5 минут
+    app.job_queue.run_repeating(job_task, interval=300, first=5)
 
-    app.post_init = on_startup
+    print("🚀 BOT STARTED")
 
     app.run_polling()
 
