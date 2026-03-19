@@ -7,9 +7,6 @@ from telegram import Bot, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CallbackQueryHandler
 from datetime import datetime
 
-# ==============================
-# НАСТРОЙКИ
-# ==============================
 TOKEN = os.getenv("TOKEN")
 CHAT_ID = int(os.getenv("CHAT_ID"))
 
@@ -49,13 +46,12 @@ def add_job(link):
         json.dump(list(sent_jobs), f)
 
 # ==============================
-# ФИЛЬТРЫ
+# FILTERS
 # ==============================
-def is_junior(title: str) -> bool:
-    title = title.lower()
-    return any(word in title for word in ["junior", "trainee", "intern"])
+def is_junior(title):
+    return any(x in title.lower() for x in ["junior", "trainee", "intern"])
 
-def is_qa(title: str) -> bool:
+def is_qa(title):
     return "qa" in title.lower()
 
 # ==============================
@@ -81,7 +77,7 @@ def generate_cover_letter(company):
 # ==============================
 # TELEGRAM
 # ==============================
-async def send_job(title, link, source, company):
+async def send_job(title, link, company):
     keyboard = [
         [
             InlineKeyboardButton("🚀 Откликнуться", callback_data=f"apply|{link}|{company}"),
@@ -91,12 +87,12 @@ async def send_job(title, link, source, company):
 
     await bot.send_message(
         chat_id=CHAT_ID,
-        text=f"🟢 JUNIOR | {source}\n{title}\n🏢 {company}\n{link}",
+        text=f"🟢 JUNIOR\n{title}\n🏢 {company}\n{link}",
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
 
 # ==============================
-# CALLBACK HANDLER
+# BUTTON HANDLER
 # ==============================
 async def button_handler(update, context):
     query = update.callback_query
@@ -109,28 +105,22 @@ async def button_handler(update, context):
 
         text = generate_cover_letter(company)
 
-        await query.message.reply_text(f"📄 Текст для отклика:\n\n{text}")
-        await query.message.reply_text(f"🔗 Открыть вакансию:\n{link}")
+        await query.message.reply_text(f"📄 Текст:\n\n{text}")
+        await query.message.reply_text(f"🔗 {link}")
 
     elif data.startswith("done"):
         _, link = data.split("|")
         applied_jobs.add(link)
         save_applied()
-        await query.edit_message_text("✅ Отмечено как откликнуто")
+        await query.edit_message_text("✅ Отмечено")
 
 # ==============================
-# FETCH
-# ==============================
-async def fetch(session, url):
-    async with session.get(url) as response:
-        return await response.text()
-
-# ==============================
-# WORK.UA
+# PARSER
 # ==============================
 async def check_workua(session):
     url = "https://www.work.ua/jobs-qa/"
-    html = await fetch(session, url)
+    async with session.get(url) as resp:
+        html = await resp.text()
 
     soup = BeautifulSoup(html, "html.parser")
     jobs = soup.find_all("div", class_="job-link")[:20]
@@ -152,39 +142,44 @@ async def check_workua(session):
         if link in sent_jobs or link in applied_jobs:
             continue
 
-        print(f"🆕 NEW JOB: {title}")
+        print("NEW:", title)
 
         add_job(link)
-        await send_job(title, link, "Work.ua", company)
+        await send_job(title, link, company)
 
 # ==============================
-# JOB TASK (каждые 5 минут)
+# BACKGROUND LOOP
 # ==============================
-async def job_task(context):
-    print("🔁 CHECK", datetime.now())
+async def job_loop():
+    await asyncio.sleep(5)
 
+    while True:
+        print("🔁 CHECK", datetime.now())
+
+        load_data()
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                await check_workua(session)
+        except Exception as e:
+            print("ERROR:", e)
+
+        await asyncio.sleep(300)
+
+# ==============================
+# MAIN
+# ==============================
+async def main():
     load_data()
 
-    async with aiohttp.ClientSession() as session:
-        try:
-            await check_workua(session)
-        except Exception as e:
-            print("❌ ERROR:", e)
-
-# ==============================
-# START
-# ==============================
-def main():
     app = Application.builder().token(TOKEN).build()
-
     app.add_handler(CallbackQueryHandler(button_handler))
 
-    # каждые 5 минут
-    app.job_queue.run_repeating(job_task, interval=300, first=5)
+    asyncio.create_task(job_loop())
 
-    print("🚀 BOT STARTED")
+    print("🚀 BOT START")
 
-    app.run_polling()
+    await app.run_polling()
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
