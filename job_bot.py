@@ -6,7 +6,7 @@ from bs4 import BeautifulSoup
 from telegram import Bot, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CallbackQueryHandler
 from datetime import datetime
-from telegram.error import TimedOut, NetworkError
+from telegram.error import TimedOut, NetworkError, Conflict
 
 TOKEN = os.getenv("TOKEN")
 CHAT_ID = int(os.getenv("CHAT_ID"))
@@ -80,7 +80,7 @@ def generate_cover_letter(company):
 
 
 # ==============================
-# TELEGRAM С ОШИБКОЙ И ПОВТОРОМ
+# TELEGRAM С ОБРАБОТКОЙ ОШИБОК
 # ==============================
 async def send_job(title, link, company):
     prefix = "🟢 JUNIOR" if is_junior(title) else "QA"
@@ -92,17 +92,20 @@ async def send_job(title, link, company):
         ]
     ]
 
-    for attempt in range(3):  # до 3 попыток отправки
+    for attempt in range(3):  # до 3 попыток
         try:
             await bot.send_message(
                 chat_id=CHAT_ID,
                 text=f"{prefix}\n{title}\n🏢 {company}\n{link}",
                 reply_markup=InlineKeyboardMarkup(keyboard)
             )
-            break  # если получилось, выходим из цикла
+            break
         except (TimedOut, NetworkError) as e:
             print(f"❌ Ошибка отправки вакансии: {title} | Попытка {attempt+1} | {e}")
-            await asyncio.sleep(2)  # подождать 2 секунды перед повтором
+            await asyncio.sleep(2)
+        except Conflict as e:
+            print(f"⚠ Конфликт getUpdates: {e} | Пропускаем отправку")
+            break
 
     await asyncio.sleep(1)  # небольшая задержка между сообщениями
 
