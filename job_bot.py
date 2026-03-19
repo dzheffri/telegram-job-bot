@@ -5,6 +5,7 @@ import json
 from bs4 import BeautifulSoup
 from telegram import Bot, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CallbackQueryHandler
+from telegram.error import TimedOut, NetworkError
 from datetime import datetime
 
 TOKEN = os.getenv("TOKEN")
@@ -13,7 +14,9 @@ CHAT_ID = int(os.getenv("CHAT_ID"))
 SENT_FILE = "sent_jobs.json"
 APPLIED_FILE = "applied_jobs.json"
 
-bot = Bot(token=TOKEN)
+# Увеличиваем таймауты для надежности
+bot = Bot(token=TOKEN, request_kwargs={"read_timeout": 10, "connect_timeout": 10})
+
 sent_jobs = set()
 applied_jobs = set()
 
@@ -89,11 +92,16 @@ async def send_job(title, link, company):
         ]
     ]
 
-    await bot.send_message(
-        chat_id=CHAT_ID,
-        text=f"🟢 JUNIOR\n{title}\n🏢 {company}\n{link}",
-        reply_markup=InlineKeyboardMarkup(keyboard)
-    )
+    try:
+        await bot.send_message(
+            chat_id=CHAT_ID,
+            text=f"🟢 JUNIOR\n{title}\n🏢 {company}\n{link}",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+    except TimedOut:
+        print(f"❌ TimedOut при отправке вакансии: {title}")
+    except NetworkError:
+        print(f"❌ NetworkError при отправке вакансии: {title}")
 
 
 # ==============================
@@ -108,14 +116,20 @@ async def button_handler(update, context):
     if data.startswith("apply"):
         _, link, company = data.split("|")
         text = generate_cover_letter(company)
-        await query.message.reply_text(f"📄 Текст:\n\n{text}")
-        await query.message.reply_text(f"🔗 {link}")
+        try:
+            await query.message.reply_text(f"📄 Текст:\n\n{text}")
+            await query.message.reply_text(f"🔗 {link}")
+        except (TimedOut, NetworkError):
+            print(f"❌ Ошибка при отправке отклика на {link}")
 
     elif data.startswith("done"):
         _, link = data.split("|")
         applied_jobs.add(link)
         save_applied()
-        await query.edit_message_text("✅ Отмечено")
+        try:
+            await query.edit_message_text("✅ Отмечено")
+        except (TimedOut, NetworkError):
+            print(f"❌ Ошибка при отметке вакансии {link}")
 
 
 # ==============================
