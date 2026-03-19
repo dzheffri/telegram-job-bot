@@ -3,174 +3,185 @@ import aiohttp
 import os
 import json
 from bs4 import BeautifulSoup
-from telegram import Bot
+from telegram import Bot, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import Application, CallbackQueryHandler
 from datetime import datetime
 import time
 
 # ==============================
-# Настройки
+# НАСТРОЙКИ
 # ==============================
 TOKEN = os.getenv("TOKEN")
 CHAT_ID = int(os.getenv("CHAT_ID"))
+
 SENT_FILE = "sent_jobs.json"
-MAX_JOBS = 1000  # Ограничение, чтобы файл не рос бесконечно
+APPLIED_FILE = "applied_jobs.json"
 
-# ==============================
-# Инициализация
-# ==============================
 bot = Bot(token=TOKEN)
+
 sent_jobs = set()
+applied_jobs = set()
 
 # ==============================
-# Работа с файлом уже отправленных вакансий
+# LOAD / SAVE
 # ==============================
-def load_jobs():
-    global sent_jobs
+def load_data():
+    global sent_jobs, applied_jobs
+
     try:
         with open(SENT_FILE, "r") as f:
             sent_jobs = set(json.load(f))
     except:
         sent_jobs = set()
 
-def save_jobs():
-    with open(SENT_FILE, "w") as f:
-        json.dump(list(sent_jobs), f)
+    try:
+        with open(APPLIED_FILE, "r") as f:
+            applied_jobs = set(json.load(f))
+    except:
+        applied_jobs = set()
+
+def save_applied():
+    with open(APPLIED_FILE, "w") as f:
+        json.dump(list(applied_jobs), f)
 
 def add_job(link):
     sent_jobs.add(link)
-    if len(sent_jobs) > MAX_JOBS:
-        sent_jobs.pop()
-    save_jobs()
+    with open(SENT_FILE, "w") as f:
+        json.dump(list(sent_jobs), f)
 
 # ==============================
-# Фильтры вакансий
+# ФИЛЬТРЫ
 # ==============================
-def is_relevant_job(title: str) -> bool:
-    title = title.lower()
-    if "qa" not in title:
-        return False
-    blacklist = ["lead", "manager", "head"]
-    if any(word in title for word in blacklist):
-        return False
-    return True
-
 def is_junior(title: str) -> bool:
     title = title.lower()
     return any(word in title for word in ["junior", "trainee", "intern"])
 
-# ==============================
-# Отправка в телеграм
-# ==============================
-async def send_message(text):
-    await bot.send_message(chat_id=CHAT_ID, text=text)
+def is_qa(title: str) -> bool:
+    return "qa" in title.lower()
 
 # ==============================
-# Асинхронный запрос страницы
+# COVER LETTER
 # ==============================
-async def fetch(session, url, headers=None):
-    async with session.get(url, headers=headers) as response:
+def generate_cover_letter(company):
+    return f"""Доброго дня!
+
+Мене зацікавила ваша вакансія {company}.
+
+Я початківець у QA, але вже маю практичний досвід:
+самостійно розробив мобільний застосунок на Swift і повністю протестував його.
+
+Працював із тест-кейсами, чек-листами, баг-репортами,
+використовую Postman, Jira, TestRail, маю базові знання SQL та API.
+
+Також створив Telegram-бота, який автоматично знаходить вакансії —
+як приклад моєї ініціативності та технічних навичок 🙂
+
+Буду радий можливості поспілкуватися!
+"""
+
+# ==============================
+# TELEGRAM
+# ==============================
+async def send_job(title, link, source, company):
+    keyboard = [
+        [
+            InlineKeyboardButton("🚀 Откликнуться", callback_data=f"apply|{link}|{company}"),
+            InlineKeyboardButton("✅ Уже откликнулся", callback_data=f"done|{link}")
+        ]
+    ]
+
+    await bot.send_message(
+        chat_id=CHAT_ID,
+        text=f"🟢 JUNIOR | {source}\n{title}\n🏢 {company}\n{link}",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
+
+# ==============================
+# CALLBACK HANDLER
+# ==============================
+async def button_handler(update, context):
+    query = update.callback_query
+    await query.answer()
+
+    data = query.data
+
+    if data.startswith("apply"):
+        _, link, company = data.split("|")
+
+        text = generate_cover_letter(company)
+
+        await query.message.reply_text(f"📄 Текст для отклика:\n\n{text}")
+        await query.message.reply_text(f"🔗 Открыть вакансию:\n{link}")
+
+    elif data.startswith("done"):
+        _, link = data.split("|")
+        applied_jobs.add(link)
+        save_applied()
+        await query.edit_message_text("✅ Отмечено как откликнуто")
+
+# ==============================
+# FETCH
+# ==============================
+async def fetch(session, url):
+    async with session.get(url) as response:
         return await response.text()
 
 # ==============================
-# DOU.ua
-# ==============================
-async def check_dou(session):
-    url = "https://jobs.dou.ua/vacancies/?search=qa"
-    headers = {"User-Agent": "Mozilla/5.0"}
-    html = await fetch(session, url, headers)
-    soup = BeautifulSoup(html, "html.parser")
-    jobs = soup.find_all("a", class_="vt")[:20]
-
-    for job in jobs:
-        title = job.text.strip()
-        link = job["href"]
-
-        if not is_relevant_job(title):
-            continue
-        if link in sent_jobs:
-            continue
-
-        add_job(link)
-        prefix = "🟢 JUNIOR" if is_junior(title) else "QA"
-        await send_message(f"{prefix} | DOU\n{title}\n{link}")
-
-# ==============================
-# Work.ua
+# WORK.UA
 # ==============================
 async def check_workua(session):
     url = "https://www.work.ua/jobs-qa/"
-    headers = {"User-Agent": "Mozilla/5.0"}
-    html = await fetch(session, url, headers)
+    html = await fetch(session, url)
+
     soup = BeautifulSoup(html, "html.parser")
     jobs = soup.find_all("div", class_="job-link")[:20]
 
     for job in jobs:
-        link_tag = job.find("a")
-        if not link_tag:
-            continue
-        title = link_tag.text.strip()
-        link = "https://www.work.ua" + link_tag["href"]
-
-        if not is_relevant_job(title):
-            continue
-        if link in sent_jobs:
+        a = job.find("a")
+        if not a:
             continue
 
-        add_job(link)
-        prefix = "🟢 JUNIOR" if is_junior(title) else "QA"
-        await send_message(f"{prefix} | Work.ua\n{title}\n{link}")
+        title = a.text.strip()
+        link = "https://www.work.ua" + a["href"]
 
-# ==============================
-# Rabota.ua
-# ==============================
-async def check_rabotaua(session):
-    url = "https://robota.ua/zapros/qa/ukraine"
-    headers = {"User-Agent": "Mozilla/5.0"}
-    html = await fetch(session, url, headers)
-    soup = BeautifulSoup(html, "html.parser")
-    jobs = soup.find_all("a", href=True)[:50]
+        company_tag = job.find("span", class_="company")
+        company = company_tag.text.strip() if company_tag else "Компанія"
 
-    for job in jobs:
-        title = job.text.strip()
-        link = job["href"]
-        if not title or not is_relevant_job(title):
+        if not is_qa(title) or not is_junior(title):
             continue
 
-        if link.startswith("/"):
-            link = "https://robota.ua" + link
-        if link in sent_jobs:
+        if link in sent_jobs or link in applied_jobs:
             continue
 
         add_job(link)
-        prefix = "🟢 JUNIOR" if is_junior(title) else "QA"
-        await send_message(f"{prefix} | Rabota.ua\n{title}\n{link}")
+        await send_job(title, link, "Work.ua", company)
 
 # ==============================
-# Основной цикл проверки вакансий
+# LOOP
 # ==============================
 async def job_loop():
-    load_jobs()
+    load_data()
+
     async with aiohttp.ClientSession() as session:
         while True:
-            print("LOOP STARTED 🔁", datetime.now())
+            print("🔁 LOOP", datetime.now())
+
             try:
-                await check_dou(session)
                 await check_workua(session)
-                await check_rabotaua(session)
-                print(f"{datetime.now()} ✅ done")
-                await asyncio.sleep(300)  # 5 минут
+                await asyncio.sleep(300)
             except Exception as e:
-                print("❌ ERROR:", e)
+                print("ERROR:", e)
                 await asyncio.sleep(60)
 
 # ==============================
-# Запуск бота с вечным перезапуском
+# START
 # ==============================
+def main():
+    app = Application.builder().token(TOKEN).build()
+    app.add_handler(CallbackQueryHandler(button_handler))
+
+    asyncio.create_task(job_loop())
+    app.run_polling()
+
 if __name__ == "__main__":
-    while True:
-        try:
-            print("🚀 BOT START", datetime.now())
-            asyncio.run(job_loop())
-        except Exception as e:
-            print("💥 CRASH:", e)
-            time.sleep(5)
+    main()
