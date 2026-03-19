@@ -6,6 +6,8 @@ from bs4 import BeautifulSoup
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CallbackQueryHandler
 from telegram.error import TimedOut, NetworkError
+from telegram.request import Request
+from telegram import Bot
 from datetime import datetime
 
 TOKEN = os.getenv("TOKEN")
@@ -16,7 +18,6 @@ APPLIED_FILE = "applied_jobs.json"
 
 sent_jobs = set()
 applied_jobs = set()
-
 
 # ==============================
 # LOAD / SAVE
@@ -79,7 +80,7 @@ def generate_cover_letter(company):
 
 
 # ==============================
-# TELEGRAM
+# TELEGRAM с повтором
 # ==============================
 async def send_job(bot, title, link, company):
     prefix = "🟢 JUNIOR" if is_junior(title) else "QA"
@@ -91,14 +92,21 @@ async def send_job(bot, title, link, company):
         ]
     ]
 
-    try:
-        await bot.send_message(
-            chat_id=CHAT_ID,
-            text=f"{prefix}\n{title}\n🏢 {company}\n{link}",
-            reply_markup=InlineKeyboardMarkup(keyboard)
-        )
-    except (TimedOut, NetworkError):
-        print(f"❌ Ошибка отправки вакансии: {title}")
+    retries = 2
+    for attempt in range(1, retries + 2):
+        try:
+            await bot.send_message(
+                chat_id=CHAT_ID,
+                text=f"{prefix}\n{title}\n🏢 {company}\n{link}",
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
+            break
+        except (TimedOut, NetworkError):
+            print(f"❌ Ошибка отправки вакансии: {title}, попытка {attempt}")
+            if attempt <= retries:
+                await asyncio.sleep(2)
+            else:
+                print(f"❌ Не удалось отправить {title} после {retries+1} попыток")
 
 
 # ==============================
@@ -114,11 +122,18 @@ async def button_handler(update, context):
     if data.startswith("apply"):
         _, link, company = data.split("|")
         text = generate_cover_letter(company)
-        try:
-            await query.message.reply_text(f"📄 Текст:\n\n{text}")
-            await query.message.reply_text(f"🔗 {link}")
-        except (TimedOut, NetworkError):
-            print(f"❌ Ошибка при отправке отклика на {link}")
+        retries = 2
+        for attempt in range(1, retries + 2):
+            try:
+                await query.message.reply_text(f"📄 Текст:\n\n{text}")
+                await query.message.reply_text(f"🔗 {link}")
+                break
+            except (TimedOut, NetworkError):
+                print(f"❌ Ошибка при отправке отклика на {link}, попытка {attempt}")
+                if attempt <= retries:
+                    await asyncio.sleep(2)
+                else:
+                    print(f"❌ Не удалось отправить отклик {link} после {retries+1} попыток")
 
     elif data.startswith("done"):
         _, link = data.split("|")
@@ -234,11 +249,15 @@ async def job_loop(bot):
 # ==============================
 def main():
     load_data()
+
+    request = Request(connect_timeout=10, read_timeout=20)
+    bot = Bot(token=TOKEN, request=request)
+
     app = Application.builder().token(TOKEN).build()
     app.add_handler(CallbackQueryHandler(button_handler))
 
     async def start_background(_app):
-        asyncio.create_task(job_loop(_app.bot))
+        asyncio.create_task(job_loop(bot))
 
     app.post_init = start_background
 
